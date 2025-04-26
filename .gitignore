@@ -1,5 +1,6 @@
+Here's your updated .gitignore file with the addition of the static directory for QR codes and barcodes:
 # Byte-compiled / optimized / DLL files
-__pycache__/
+**pycache**/
 *.py[cod]
 *$py.class
 
@@ -118,7 +119,7 @@ ipython_config.py
 .pdm-build/
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+****pypackages****/
 
 # Celery stuff
 celerybeat-schedule
@@ -173,3 +174,13 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Generated QR codes and barcodes
+static/qrcodes/
+static/barcodes/
+
+# Keep directory structure but ignore content
+!static/qrcodes/.gitkeep
+!static/barcodes/.gitkeep
+
+# macOS system files
+.DS_Store
