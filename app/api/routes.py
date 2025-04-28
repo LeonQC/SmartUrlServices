@@ -5,26 +5,19 @@ from app.services import url_service, qr_service, barcode_service
 from app.cache.redis_client import redis_client
 import os
 import json
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 # Create a router for our API endpoints
 router = APIRouter()
 
-def rate_limit(key, limit=10, period=60):
-    # Increment the counter
-    current = redis_client.incr(f"ratelimit:{key}")
-    # Set expiry on first request
-    if current == 1:
-        redis_client.expire(f"ratelimit:{key}", period)
-    # Check if rate limit exceeded
-    return current <= limit
+# Get limiter from app state
+limiter = Limiter(key_func=get_remote_address)
 
 # Endpoint to create a short URL
 @router.post("/shorten/", response_model=URLResponse, status_code=201)
+@limiter.limit("10/minute")
 def create_short_url(url_request: URLRequest, request: Request):
-    # Rate limit based on IP address
-    client_ip = request.client.host
-    if not rate_limit(f"shorten:{client_ip}", limit=10, period=60):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     # Get the base URL of our application
     base_url = str(request.base_url)
     # Create a short URL
@@ -67,11 +60,8 @@ def get_url_info(short_code: str, request: Request):
 
 # Endpoint to create a QR code
 @router.post("/qrcode/", response_model=QRCodeResponse, status_code=201)
+@limiter.limit("10/minute")
 def create_qr_code(qr_request: QRCodeRequest, request: Request):
-    # Rate limit based on IP address
-    client_ip = request.client.host
-    if not rate_limit(f"qrcode:{client_ip}", limit=10, period=60):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     # Get the base URL of our application
     base_url = str(request.base_url)
     # Create a QR code
@@ -135,11 +125,8 @@ def get_qr_code_info(qr_code_id: str, request: Request):
 
 # Endpoint to create a barcode
 @router.post("/barcode/", response_model=BarcodeResponse, status_code=201)
+@limiter.limit("10/minute")
 def create_barcode(barcode_request: BarcodeRequest, request: Request):
-    # Rate limit based on IP address
-    client_ip = request.client.host
-    if not rate_limit(f"barcode:{client_ip}", limit=10, period=60):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     # Get the base URL of our application
     base_url = str(request.base_url)
     # Create a barcode

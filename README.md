@@ -180,12 +180,22 @@ SmartUrl is a simple yet powerful URL management platform that helps convert lon
 
 ## Performance Optimization
 
-The application uses Redis for performance optimization in several key areas:
+The application uses several techniques for performance optimization:
 
-1. **Redirect Caching**: Popular short URLs, QR codes, and barcodes are cached in Redis to reduce database lookups.
+1. **Redis Caching**: Popular short URLs, QR codes, and barcodes are cached in Redis to reduce database lookups.
 2. **Counter Batching**: Click and scan counts are aggregated in Redis and updated in the database periodically (every 10 increments) to reduce database writes.
 3. **Info Caching**: Frequently requested information about resources is cached to improve response times.
-4. **Rate Limiting**: API endpoints are protected against abuse with Redis-based rate limiting.
+4. **Rate Limiting**: API endpoints are protected against abuse with SlowAPI-based rate limiting, enforcing limits of 10 requests per minute for resource creation endpoints.
+
+### Rate Limiting Implementation
+
+The application uses the SlowAPI library to provide rate limiting:
+
+- Resource creation endpoints (/shorten/, /qrcode/, /barcode/) are limited to 10 requests per minute per IP address
+- When rate limits are exceeded, the API returns a 429 Too Many Requests response
+- Rate limits help protect the service from abuse while ensuring fair usage for all clients
+
+To modify rate limits, you can adjust the `@limiter.limit()` decorators in `app/api/routes.py`.
 
 ## Website Title Extraction
 
