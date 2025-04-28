@@ -189,13 +189,26 @@ The application uses several techniques for performance optimization:
 
 ### Rate Limiting Implementation
 
-The application uses the SlowAPI library to provide rate limiting:
+The application uses the SlowAPI library to provide tiered rate limiting:
 
-- Resource creation endpoints (/shorten/, /qrcode/, /barcode/) are limited to 10 requests per minute per IP address
-- When rate limits are exceeded, the API returns a 429 Too Many Requests response
-- Rate limits help protect the service from abuse while ensuring fair usage for all clients
+- **Tier 1: Resource Creation** (10 requests per minute)
+  - `/shorten/`: Create short URLs
+  - `/qrcode/`: Create QR codes
+  - `/barcode/`: Create barcodes
+  
+- **Tier 2: Resource Information** (60 requests per minute)
+  - `/info/{short_code}`: Get short URL information
+  - `/qrcode/info/{qr_code_id}`: Get QR code information
+  - `/barcode/info/{barcode_id}`: Get barcode information
+  
+- **Tier 3: User-Facing Endpoints** (No rate limiting)
+  - `/{short_code}`: Redirect from short URLs
+  - `/qrcode/{qr_code_id}`: Redirect from QR codes
+  - `/barcode/{barcode_id}`: Redirect from barcodes
+  - `/qrcode/{qr_code_id}/image`: Get QR code images
+  - `/barcode/{barcode_id}/image`: Get barcode images
 
-To modify rate limits, you can adjust the `@limiter.limit()` decorators in `app/api/routes.py`.
+This tiered approach protects resource-intensive operations while ensuring high availability for end-user experiences. Rate limits are applied per IP address.
 
 ## Website Title Extraction
 

@@ -42,6 +42,7 @@ def redirect_to_url(short_code: str):
 
 # Endpoint to get information about a short URL
 @router.get("/info/{short_code}", response_model=URLResponse)
+@limiter.limit("60/minute")
 def get_url_info(short_code: str, request: Request):
     # Get the base URL of our application
     base_url = str(request.base_url)
@@ -107,6 +108,7 @@ def redirect_from_qr_code(qr_code_id: str):
 
 # Endpoint to get information about a QR code
 @router.get("/qrcode/info/{qr_code_id}", response_model=QRCodeResponse)
+@limiter.limit("60/minute")
 def get_qr_code_info(qr_code_id: str, request: Request):
     # Get the base URL of our application
     base_url = str(request.base_url)
@@ -172,6 +174,7 @@ def redirect_from_barcode(barcode_id: str):
 
 # Endpoint to get information about a barcode
 @router.get("/barcode/info/{barcode_id}", response_model=BarcodeResponse)
+@limiter.limit("60/minute")
 def get_barcode_info(barcode_id: str, request: Request):
     # Get the base URL of our application
     base_url = str(request.base_url)
