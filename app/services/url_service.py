@@ -8,15 +8,6 @@ from bs4 import BeautifulSoup
 from app.database import url_db as db
 from app.cache.redis_client import redis_client, CACHE_TTL
 
-# Configure Redis connection
-redis_client = redis.Redis(
-    host=os.environ.get("REDIS_HOST", "localhost"),
-    port=int(os.environ.get("REDIS_PORT", 6379)),
-    db=0,
-    decode_responses=True
-)
-CACHE_TTL = 3600  # Cache for 1 hour
-
 # Generate a random code (like abc123)
 def generate_random_code(length=6):
     # Use letters and numbers
