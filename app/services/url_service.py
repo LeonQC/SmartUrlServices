@@ -5,7 +5,7 @@ import redis
 import requests
 import json
 from bs4 import BeautifulSoup
-from app.database import db
+from app.database import url_db as db
 from app.cache.redis_client import redis_client, CACHE_TTL
 
 # Configure Redis connection

@@ -1,97 +1,55 @@
 """
 Business logic for QR code generation
 """
+import qrcode
 import random
 import string
-import qrcode
-import os
-import requests
+import io
+from app.database import url_db as db
+from app.cache.redis_client import redis_client
 import json
+from app.services.s3_service import upload_file_to_s3, file_exists_in_s3, get_s3_file_url
+import requests
 from bs4 import BeautifulSoup
-from app.database import db
-from app.cache.redis_client import redis_client, CACHE_TTL
-
-# Create a folder for storing QR code images
-os.makedirs("static/qrcodes", exist_ok=True)
+import os
 
 
-# Generate a random code (like qr123)
-def generate_random_code(length=6):
-    # Use letters and numbers
-    chars = string.ascii_letters + string.digits
-    # Create a random string of 6 characters
-    return 'qr_' + ''.join(random.choice(chars) for _ in range(length))
+# Create a new QR code
+def create_qr_code(target_url, base_url):
+    # Generate a random QR code ID
+    qr_code_id = generate_random_id()
 
+    # Try to extract the title from the URL
+    title = extract_title(target_url)
 
-# Create a code that isn't already used
-def create_unique_code():
-    # Try up to 10 times
-    for _ in range(10):
-        qr_code_id = generate_random_code()
-        # If code isn't in the database, use it
-        if not db.qr_code_exists(qr_code_id):
-            return qr_code_id
-
-    # If we get here, try with a longer code
-    return create_unique_code(length=7)
-
-
-# Try to extract title from webpage
-def extract_title(url):
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title_tag = soup.find('title')
-            if title_tag:
-                return title_tag.text.strip()
-    except Exception:
-        pass
-    return None
-
-
-# Create a QR code image and save it
-def generate_qr_code_image(url, qr_code_id):
+    # Create a QR code image
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=10,
         border=4,
     )
-    qr.add_data(url)
+    qr.add_data(f"{base_url}qrcode/{qr_code_id}")
     qr.make(fit=True)
 
+    # Create the QR code image
     img = qr.make_image(fill_color="black", back_color="white")
 
-    # Save the image
-    img_path = f"static/qrcodes/{qr_code_id}.png"
-    img.save(img_path)
+    # Save the image to a BytesIO object
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
 
-    return img_path
+    # Upload to S3
+    file_path = f"qrcodes/{qr_code_id}.png"
+    s3_url = upload_file_to_s3(img_byte_arr.getvalue(), file_path, 'image/png')
 
+    # Save QR code in the database
+    db.save_qr_code(target_url, qr_code_id, title)
 
-# Create a new QR code
-def create_qr_code(target_url, base_url):
-    # Convert URL to string
-    original_url = str(target_url)
-    # Generate a unique code
-    qr_code_id = create_unique_code()
-
-    # Try to extract title
-    title = extract_title(original_url)
-
-    # Generate the QR code image
-    generate_qr_code_image(original_url, qr_code_id)
-
-    # Save to database
-    db.save_qr_code(original_url, qr_code_id, title)
-
-    # Prepare response
-    result = {
-        "original_url": original_url,
+    # Create the response object
+    response = {
+        "original_url": target_url,
         "qr_code_id": qr_code_id,
         "qr_code_url": f"{base_url}qrcode/{qr_code_id}",
         "qr_image_url": f"{base_url}qrcode/{qr_code_id}/image",
@@ -99,84 +57,133 @@ def create_qr_code(target_url, base_url):
         "title": title
     }
 
-    # Cache the original URL for redirects
-    redis_client.setex(f"qrcode:{qr_code_id}", CACHE_TTL, original_url)
-
-    # Cache the full info response
-    redis_client.setex(f"qrinfo:{qr_code_id}", CACHE_TTL, json.dumps(result))
-
-    return result
-
-
-# Increment the scan counter
-def increment_counter(qr_code_id):
-    # Increment in Redis
-    redis_client.incr(f"qrscans:{qr_code_id}")
-    # Every 10 increments, update the database
-    if int(redis_client.get(f"qrscans:{qr_code_id}") or "0") % 10 == 0:
-        # Get current count
-        count = int(redis_client.get(f"qrscans:{qr_code_id}") or "0")
-        # Update database with absolute count
-        db.update_qr_scan_count(qr_code_id, count)
-
-
-# Get information about a QR code
-def get_qr_code_info(qr_code_id, base_url):
-    # Try to get from cache first
-    cached_info = redis_client.get(f"qrinfo:{qr_code_id}")
-    if cached_info:
-        return json.loads(cached_info)
-
-    # Not in cache, get from database
-    result = db.find_qr_code_by_id(qr_code_id)
-
-    # If not found, return None
-    if not result:
-        return None
-
-    # Extract information
-    original_url, scans, title = result
-
-    # Prepare response
-    response = {
-        "original_url": original_url,
-        "qr_code_id": qr_code_id,
-        "qr_code_url": f"{base_url}qrcode/{qr_code_id}",
-        "qr_image_url": f"{base_url}qrcode/{qr_code_id}/image",
-        "scans": scans,
-        "title": title
-    }
-
-    # Cache the result
-    redis_client.setex(f"qrinfo:{qr_code_id}", CACHE_TTL, json.dumps(response))
+    # Cache the QR code info
+    redis_client.set(f"qrcode:{qr_code_id}", target_url)
+    redis_client.set(f"qrinfo:{qr_code_id}", json.dumps(response))
+    redis_client.set(f"qrscans:{qr_code_id}", 0)
 
     return response
 
 
-# Process a redirect when QR code is scanned
-def handle_qr_redirect(qr_code_id):
-    # Try to get from cache first
-    cached_url = redis_client.get(f"qrcode:{qr_code_id}")
-    if cached_url:
-        # Still update scan counter
-        increment_counter(qr_code_id)
-        return cached_url
+# Generate a random ID for QR codes
+def generate_random_id(length=8):
+    # Generate a random ID of the given length
+    characters = string.ascii_letters + string.digits
+    random_id = ''.join(random.choice(characters) for _ in range(length))
 
-    # Not in cache, get from database
-    result = db.find_qr_code_by_id(qr_code_id)
+    # Check if the ID already exists in the database
+    while db.qr_code_exists(random_id):
+        random_id = ''.join(random.choice(characters) for _ in range(length))
 
-    # If not found, return None
-    if not result:
+    return random_id
+
+
+# Extract title from a URL
+def extract_title(url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        title_tag = soup.find('title')
+
+        if title_tag:
+            return title_tag.text.strip()
+        else:
+            return None
+    except Exception as e:
+        print(f"Error extracting title: {e}")
         return None
 
-    # Get the original URL
-    original_url = result[0]
 
-    # Update cache
-    redis_client.setex(f"qrcode:{qr_code_id}", CACHE_TTL, original_url)
+# Handle redirection from QR code to original URL
+def handle_qr_redirect(qr_code_id):
+    # Try to get the URL from Redis cache
+    original_url = redis_client.get(f"qrcode:{qr_code_id}")
 
-    # Increment counter
-    increment_counter(qr_code_id)
+    if original_url:
+        # Increment the scan counter in Redis
+        redis_client.incr(f"qrscans:{qr_code_id}")
 
-    # Return the original URL
-    return original_url
+        # If the counter is a multiple of 10, update the database
+        scans = int(redis_client.get(f"qrscans:{qr_code_id}") or 0)
+        if scans % 10 == 0:
+            db.update_qr_scan_count(qr_code_id, scans)
+
+        return original_url
+
+    # If not in cache, get from database
+    result = db.find_qr_code_by_id(qr_code_id)
+
+    if result:
+        original_url, scans, title = result
+
+        # Increment the scan counter
+        scans += 1
+        db.increment_qr_scans(qr_code_id)
+
+        # Update the cache
+        redis_client.set(f"qrcode:{qr_code_id}", original_url)
+        redis_client.set(f"qrscans:{qr_code_id}", scans)
+
+        return original_url
+
+    return None
+
+
+# Get information about a QR code
+def get_qr_code_info(qr_code_id, base_url):
+    # Try to get from Redis cache
+    qr_info = redis_client.get(f"qrinfo:{qr_code_id}")
+
+    if qr_info:
+        info = json.loads(qr_info)
+
+        # Update the scan count in the cached info
+        scans = int(redis_client.get(f"qrscans:{qr_code_id}") or 0)
+        info["scans"] = scans
+
+        return info
+
+    # If not in cache, get from database
+    result = db.find_qr_code_by_id(qr_code_id)
+
+    if result:
+        original_url, scans, title = result
+
+        # Create response object
+        response = {
+            "original_url": original_url,
+            "qr_code_id": qr_code_id,
+            "qr_code_url": f"{base_url}qrcode/{qr_code_id}",
+            "qr_image_url": f"{base_url}qrcode/{qr_code_id}/image",
+            "scans": scans,
+            "title": title
+        }
+
+        # Update the cache
+        redis_client.set(f"qrinfo:{qr_code_id}", json.dumps(response))
+        redis_client.set(f"qrcode:{qr_code_id}", original_url)
+        redis_client.set(f"qrscans:{qr_code_id}", scans)
+
+        return response
+
+    return None
+
+
+# Get QR code image URL (used by url_routes.py)
+def get_qr_code_image_url(qr_code_id):
+    # Check if QR code exists in database
+    if not db.qr_code_exists(qr_code_id):
+        return None
+
+    # Generate the file path
+    file_path = f"qrcodes/{qr_code_id}.png"
+
+    # Check if the file exists in S3
+    if not file_exists_in_s3(file_path):
+        return None
+
+    # Return the S3 URL for the image
+    return get_s3_file_url(file_path)

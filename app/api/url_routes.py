@@ -1,18 +1,20 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
-from fastapi.responses import RedirectResponse, FileResponse
-from app.models.schemas import URLRequest, URLResponse, QRCodeRequest, QRCodeResponse, BarcodeRequest, BarcodeResponse
+from fastapi.responses import RedirectResponse, JSONResponse
+from app.models.url_schemas import URLRequest, URLResponse, QRCodeRequest, QRCodeResponse, BarcodeRequest, BarcodeResponse
 from app.services import url_service, qr_service, barcode_service
 from app.cache.redis_client import redis_client
 import os
 import json
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+import requests
 
 # Create a router for our API endpoints
 router = APIRouter()
 
 # Get limiter from app state
 limiter = Limiter(key_func=get_remote_address)
+
 
 # Endpoint to create a short URL
 @router.post("/shorten/", response_model=URLResponse, status_code=201)
@@ -81,15 +83,14 @@ def get_qr_code_image(qr_code_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="QR code not found")
 
-    # Path to the QR code image
-    image_path = f"static/qrcodes/{qr_code_id}.png"
+    # Get the S3 URL for the QR code image
+    image_url = qr_service.get_qr_code_image_url(qr_code_id)
 
-    # Check if file exists
-    if not os.path.isfile(image_path):
+    if not image_url:
         raise HTTPException(status_code=404, detail="QR code image not found")
 
-    # Return the image file
-    return FileResponse(image_path)
+    # Redirect to the S3 URL
+    return RedirectResponse(url=image_url)
 
 
 # Endpoint to redirect from QR code to original URL
@@ -147,15 +148,14 @@ def get_barcode_image(barcode_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="Barcode not found")
 
-    # Path to the barcode image
-    image_path = f"static/barcodes/{barcode_id}.png"
+    # Get the S3 URL for the barcode image
+    image_url = barcode_service.get_barcode_image_url(barcode_id)
 
-    # Check if file exists
-    if not os.path.isfile(image_path):
+    if not image_url:
         raise HTTPException(status_code=404, detail="Barcode image not found")
 
-    # Return the image file
-    return FileResponse(image_path)
+    # Redirect to the S3 URL
+    return RedirectResponse(url=image_url)
 
 
 # Endpoint to redirect from barcode to original URL
