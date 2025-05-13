@@ -1,5 +1,6 @@
 # Python specific
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -23,6 +24,7 @@ var/
 venv/
 .venv/
 ENV/
+smarturl-env/
 
 # Virtual environment
 virtualenv/
@@ -47,16 +49,23 @@ static/barcodes/
 logs/
 *.log
 npm-debug.log*
+app.log
 
 # Docker
 docker-compose.override.yml
 
 # AWS
 aws-credentials.json
+SmartUrl-KeyPair.pem
 
 # Database
 *.sqlite3
 *.db
+app.pid
+
+# Redis data
+dump.rdb
+*.rdb
 
 # Other
 *.bak
@@ -77,3 +86,21 @@ htmlcov/
 .python-version  # pyenv
 .env.local
 .env.development
+
+# Local test scripts
+test_db_connection.py
+test_redis_connection.py
+test_s3_connection.py
+test_s3_simple.py
+inspect_aws_creds.py
+tunnel.sh
+stop_tunnel.sh
+
+# Generated content
+generated_images/
+uploads/
+downloads/
+**/.claude/settings.local.json
+
+# Documentation
+documents/SmartUrl-Technical-Documentation.md

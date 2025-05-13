@@ -21,7 +21,8 @@ SmartUrl provides a robust API for creating short URLs, QR codes, and barcodes w
 
 - Python 3.8+
 - Docker and Docker Compose
-- AWS Account (for S3 and RDS)
+- AWS Account (for S3, RDS, and ElastiCache)
+- SSH client (for connecting to EC2 jump host)
 - PostgreSQL client (for development)
 
 ## 🔧 Installation
@@ -47,7 +48,7 @@ Create a `.env` file in the project root:
 
 ```
 # Database configuration
-DB_HOST=your-instance.xxxxx.region.rds.amazonaws.com
+DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=your_password
@@ -57,32 +58,214 @@ DB_NAME=smarturl
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_TTL=3600
+REDIS_SSL=false
 
 # AWS configuration
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_REGION=your_region
+AWS_REGION=eu-west-2
 S3_BUCKET_NAME=your-bucket-name
 
 # JWT Authentication
 JWT_SECRET=your-secret-key-for-jwt
 JWT_ACCESS_EXPIRE=3600
 JWT_REFRESH_EXPIRE=604800
+
+# Google OAuth (optional)
+GOOGLE_CLIENT_ID=your-google-client-id
 ```
 
-4. **Start Redis via Docker**
+## 🏃‍♂️ Running the Service
+
+### Local Development Setup
+
+For local development without AWS:
+
+1. **Start PostgreSQL and Redis via Docker**
 
 ```bash
 docker-compose up -d
 ```
 
-5. **Run the application**
+2. **Run the application**
 
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
 
-## Authentication Configuration Explained
+3. **Access the API documentation**
+
+Open your browser to http://localhost:8000/docs to view and test the API.
+
+### AWS Setup
+
+For running with AWS services:
+
+1. **Set up the SSH key for EC2 jump host access**
+
+```bash
+chmod 600 SmartUrl-KeyPair.pem
+```
+
+2. **Start the SSH tunnel to AWS services**
+
+```bash
+./tunnel.sh
+```
+
+This creates tunnels to:
+- PostgreSQL: localhost:5432 → RDS instance
+- Redis: localhost:6379 → ElastiCache instance
+
+3. **Verify AWS connections**
+
+```bash
+python test_aws_connections.py
+```
+
+4. **Run the application**
+
+```bash
+uvicorn main:app --reload
+```
+
+5. **To close the tunnel when done**
+
+```bash
+pkill -f 'ssh -i.*smarturl'
+```
+
+## 🔨 AWS Architecture and Configuration
+
+### AWS Services Used
+
+1. **Amazon RDS for PostgreSQL**
+   - Database service for URL and user data
+   - Located in a private subnet for security
+   - Access through EC2 jump host via SSH tunnel
+
+2. **Amazon ElastiCache for Redis**
+   - Caching service for improved performance
+   - Reduces database load
+   - Access through EC2 jump host via SSH tunnel
+
+3. **Amazon S3**
+   - Storage for QR code and barcode images
+   - Public read access for serving images
+   - Private write access with AWS credentials
+
+4. **Amazon EC2**
+   - Jump host for secure access to private services
+   - Acts as a security gateway to RDS and ElastiCache
+   - SSH key-based authentication
+
+### Configuring AWS Services
+
+#### RDS PostgreSQL Setup
+
+1. Create an RDS PostgreSQL instance in the AWS Console:
+   - Engine: PostgreSQL
+   - Version: 13.4 or newer
+   - Instance type: db.t3.micro (for development)
+   - Storage: 20GB (minimum)
+   - Multi-AZ: No (for development)
+   - VPC: Private subnet with security group
+   - Security Group: Allow inbound from EC2 jump host only
+
+2. Initialize the database:
+   - The application will create required tables at startup
+   - Database schema documentation is in `documents/SmartUrl-database-schema.md`
+
+#### ElastiCache Redis Setup
+
+1. Create an ElastiCache Redis instance:
+   - Engine: Redis
+   - Version: 6.x or newer
+   - Node type: cache.t3.micro (for development)
+   - Number of nodes: 1 (for development)
+   - VPC: Same VPC as RDS
+   - Security Group: Allow inbound from EC2 jump host only
+
+2. Configure Redis in `.env`:
+   - When using tunnel: host=localhost
+   - Set REDIS_SSL=false when using tunnel
+
+#### S3 Bucket Setup
+
+1. Create an S3 bucket:
+   - Name: Choose a unique name
+   - Region: Same as RDS/ElastiCache
+   - Access: Block all public access
+   - Versioning: Disabled (for development)
+
+2. Configure bucket policy to allow read access:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::your-bucket-name/*"
+        }
+    ]
+}
+```
+
+3. Set up CORS configuration:
+```json
+[
+    {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET"],
+        "AllowedOrigins": ["*"],
+        "ExposeHeaders": []
+    }
+]
+```
+
+4. Create an IAM user with S3 permissions:
+   - Create a new IAM user for programmatic access
+   - Attach policy: AmazonS3FullAccess
+   - Save access key and secret for `.env` file
+
+#### EC2 Jump Host Setup
+
+1. Launch an EC2 instance:
+   - Amazon Linux 2
+   - t2.micro (for development)
+   - VPC: Same as RDS/ElastiCache
+   - Security Group: Allow SSH inbound (port 22) from your IP
+   - Key Pair: Generate new or use existing (save as SmartUrl-KeyPair.pem)
+
+2. Configure security groups:
+   - EC2 Security Group: Allow SSH (port 22) from your IP
+   - RDS Security Group: Allow PostgreSQL (port 5432) from EC2 Security Group
+   - ElastiCache Security Group: Allow Redis (port 6379) from EC2 Security Group
+
+### SSH Tunnel Setup
+
+The `tunnel.sh` script creates SSH tunnels to access AWS services:
+
+```bash
+#!/bin/bash
+ssh -i ./SmartUrl-KeyPair.pem \
+    -L 5432:smarturl-postgres.cfai00ak63dx.eu-west-2.rds.amazonaws.com:5432 \
+    -L 6379:smarturl-redis.ddr3jj.0001.euw2.cache.amazonaws.com:6379 \
+    -N -f ec2-user@18.168.0.231
+```
+
+When running the tunnel:
+1. Local port 5432 connects to your RDS instance
+2. Local port 6379 connects to your ElastiCache instance
+3. `-N` prevents executing remote commands
+4. `-f` runs the tunnel in the background
+
+## 📊 Development
+
+### Authentication Configuration Explained
 
 The JWT authentication system requires three environment variables:
 
@@ -99,26 +282,6 @@ The JWT authentication system requires three environment variables:
 - **JWT_REFRESH_EXPIRE**: The lifespan of refresh tokens in seconds. The default is 604800 (7 days).
   - Longer-lived refresh tokens reduce the need for users to log in frequently
   - Users can get new access tokens without re-authenticating until this expires
-
-## 📝 Configuration
-
-### AWS Setup
-
-#### RDS PostgreSQL Configuration
-
-1. Create an RDS PostgreSQL instance in the AWS Console
-2. Configure a security group to allow traffic from your application
-3. Set the master username, password, and database name
-4. Update your `.env` file with the connection details
-
-#### S3 Bucket Configuration
-
-1. Create an S3 bucket for storing QR codes and barcodes
-2. Configure the bucket for public read access
-3. Set up appropriate CORS configuration
-4. Update your `.env` file with bucket details
-
-## 📊 Development
 
 ### Code Quality
 
@@ -156,9 +319,15 @@ smarturl/
 │   └── cache/
 │       ├── redis_client.py    # Redis caching functionality
 │       └── cache_manager.py   # Cache management utilities
+├── documents/
+│   ├── SmartUrl-api.md              # API documentation
+│   ├── SmartUrl-database-schema.md  # Database schema documentation
+│   └── SmartUrl-Technical-Documentation.md # Comprehensive documentation
 ├── main.py                    # Application entry point
 ├── requirements.txt           # Project dependencies
 ├── .env                       # Environment variables
+├── tunnel.sh                  # SSH tunnel script
+├── test_aws_connections.py    # AWS connection tester
 └── docker-compose.yml         # Docker services configuration
 ```
 
@@ -171,67 +340,25 @@ For local development with a PostgreSQL container instead of RDS:
 docker-compose -f docker-compose.dev.yml up -d
 ```
 
-### Connection Verification
-
-During setup, you can verify that your connections to required services are working correctly through the application's startup sequence. The application checks connections to:
-
-- PostgreSQL database
-- Redis cache
-- S3 storage
-
-If any connection issues occur, they will be logged at startup.
-
-### Connecting to AWS Services
-
-For development purposes, you can connect to AWS services through an EC2 jump host using an SSH tunnel:
-
-1. The repository includes `SmartUrl-KeyPair.pem` for connecting to the EC2 jump host. Make sure it has the proper permissions:
-   ```bash
-   chmod 600 SmartUrl-KeyPair.pem
-   ```
-
-2. Use the `tunnel.sh` script to create SSH tunnels to AWS services:
-   ```bash
-   ./tunnel.sh
-   ```
-
-   This sets up local port forwarding:
-   - PostgreSQL: localhost:5432 → RDS instance
-   - Redis: localhost:6379 → ElastiCache instance
-
-3. Test the connectivity to ensure all services are accessible:
-   ```bash
-   python test_aws_connections.py
-   ```
-
-   This will verify your connections to PostgreSQL, Redis, and S3.
-
-4. To close the tunnel when you're done:
-   ```bash
-   pkill -f 'ssh -i.*smarturl'
-   ```
-
-**Note:** In a production environment, the private key would typically not be included in the repository. We've included it here for development simplicity.
-
 ## Using the API
 
 ### Authentication
 
 **Register a new user**:
 ```
-POST /auth/register
+POST /api/auth/register
 {
-  "username": "johndoe",
   "email": "john@example.com",
-  "password": "securepassword"
+  "password": "securepassword",
+  "name": "John Doe"
 }
 ```
 
 **Login**:
 ```
-POST /auth/login
+POST /api/auth/login
 {
-  "username": "johndoe",
+  "email": "john@example.com",
   "password": "securepassword"
 }
 ```
@@ -246,50 +373,57 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 **Create short URL**:
 ```
-POST /shorten/
+POST /api/urls/shorten
 {
-  "target_url": "https://example.com/your/long/url"
+  "original_url": "https://example.com/your/long/url"
 }
 ```
 
 **Create QR code**:
 ```
-POST /qrcode/
+POST /api/qr/create
 {
-  "target_url": "https://example.com/your/long/url"
+  "content": "https://example.com/your/long/url"
 }
 ```
 
 **Create barcode**:
 ```
-POST /barcode/
+POST /api/barcode/create
 {
-  "target_url": "https://example.com/your/long/url"
+  "content": "https://example.com/your/long/url",
+  "barcode_type": "code128"
 }
 ```
 
 ### Viewing History
 
-**Get URL history**:
+**Get URL click history**:
 ```
-GET /urls/history?page=1&limit=20&sort_field=created_at&sort_order=desc
-```
-
-**Get QR code history**:
-```
-GET /qrcodes/history?page=1&limit=20&sort_field=created_at&sort_order=desc
+GET /api/history/url/{short_code}?page=1&limit=20
 ```
 
-**Get barcode history**:
+**Get QR code scan history**:
 ```
-GET /barcodes/history?page=1&limit=20&sort_field=created_at&sort_order=desc
+GET /api/history/qr/{qr_id}?page=1&limit=20
+```
+
+**Get barcode scan history**:
+```
+GET /api/history/barcode/{barcode_id}?page=1&limit=20
+```
+
+**Get user history**:
+```
+GET /api/history/user/{user_id}?page=1&limit=20&resource_type=url
 ```
 
 All history endpoints support the following parameters:
 - `page`: Page number (default: 1)
 - `limit`: Items per page (default: 20)
-- `sort_field`: Field to sort by (`created_at` or `clicks`/`scans`)
-- `sort_order`: Sort direction (`asc` or `desc`)
+- `start_date`: Filter by start date (ISO format)
+- `end_date`: Filter by end date (ISO format)
+- `resource_type`: Filter by resource type (url, qr, barcode)
 
 ## 🚢 Deployment
 
@@ -299,14 +433,13 @@ The application provides several admin endpoints for maintenance:
 
 **Sync click counts**:
 ```
-GET /admin/sync-clicks
+POST /api/admin/sync-clicks
 ```
 
 **Cache management**:
 ```
-GET /auth/admin/cache/stats
-POST /auth/admin/cache/clear/{entity_type}
-GET /auth/admin/redis/info
+GET /api/admin/cache/stats
+POST /api/admin/cache/clear/{prefix}
 ```
 
 ### Production Considerations
@@ -318,6 +451,14 @@ GET /auth/admin/redis/info
 - Set up CloudFront for content delivery
 - Configure scheduled tasks for cache synchronization
 - Implement proper database backup strategies
+
+## 📚 Documentation
+
+For comprehensive technical documentation, see:
+
+- `documents/SmartUrl-Technical-Documentation.md` - Complete system documentation
+- `documents/SmartUrl-api.md` - API documentation
+- `documents/SmartUrl-database-schema.md` - Database schema documentation
 
 ## 🙏 Acknowledgements
 
