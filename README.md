@@ -1,346 +1,481 @@
-# SmartUrl Backend
+# SmartUrl
 
-SmartUrl is a simple yet powerful URL management platform that helps convert long URLs into compact, easy-to-share links, QR codes, and barcodes. The project supports automatic website title extraction, comprehensive analytics, and user-based resource management, allowing you to track and optimize the performance of all your shared links.
+> A modern URL shortening and QR code generation service built with FastAPI and PostgreSQL.
 
-## Features
+SmartUrl provides a robust API for creating short URLs, QR codes, and barcodes with built-in analytics. The service is designed for scalability, using AWS S3 for image storage and AWS RDS for database management.
 
-### Current Features
+## 🚀 Features
 
-- **URL Shortening**: Convert long URLs into short, manageable links
-- **Click Tracking**: Monitor how many times each short link has been accessed
-- **QR Code Generation**: Create QR codes from your URLs
-- **Barcode Generation**: Generate barcodes for your URLs
-- **Scan Tracking**: Monitor how many times each QR code and barcode has been scanned
-- **Title Extraction**: Automatically extract and display the title of the target website for all resources (URLs, QR codes, and barcodes)
-- **Info Endpoints**: Get statistics about your shortened URLs, QR codes, and barcodes
-- **Redis Caching**: Improved performance with in-memory caching for all resources (URLs, QR codes, and barcodes)
-- **Counter Batching**: Efficient counter updates with Redis (reduces database writes)
-- **Rate Limiting**: Protection against API abuse with Redis-based rate limiting
-- **Dockerized Environment**: Easy setup with containerized services
+- **URL Shortening** - Convert long URLs to compact, shareable links
+- **QR Code Generation** - Create scannable QR codes for any URL
+- **Barcode Creation** - Generate barcodes linked to destinations
+- **User Management** - Register, login, and track your resources
+- **History Tracking** - View your created links, QR codes, and barcodes
+- **Title Extraction** - Automatically extract webpage titles
+- **Analytics** - Track clicks, scans, and engagement metrics
+- **AWS Integration** - S3 for image storage, RDS for database
+- **Performance Optimized** - Redis caching and counter batching
+- **Rate Limiting** - Tiered protection against API abuse
 
-### Planned Features
+## 📋 Prerequisites
 
-- **User Authentication**: Create an account and manage your links
-- **Advanced Analytics**: Get detailed stats about link usage
-- **Personalized Dashboards**: View statistics for all your shortened URLs, QR codes, and barcodes in one place
-- **History Pages**: View paginated history of all resources you've created
-- **Resource Management**: Ability to delete or edit your created resources
-- **Visual Analytics**: Charts and graphs showing usage patterns over time
-- **Export Capabilities**: Download your analytics data in various formats
-
-## Getting Started
-
-### Prerequisites
-
-- Docker and Docker Compose
 - Python 3.8+
-- pip (Python package manager)
+- Docker and Docker Compose
+- AWS Account (for S3, RDS, and ElastiCache)
+- SSH client (for connecting to EC2 jump host)
+- PostgreSQL client (for development)
 
-### Installation
+## 🔧 Installation
 
 1. **Clone the repository**
 
-   ```bash
-   git clone https://github.com/tonyx1998/smarturl.git
-   cd smarturl
-   ```
+```bash
+git clone https://github.com/yourusername/smarturl.git
+cd smarturl
+```
 
-2. **Set up a virtual environment**
+2. **Create and activate virtual environment**
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-3. **Install dependencies**
+3. **Set up environment variables**
 
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set up Docker services**
-
-   Create a `docker-compose.yml` file in your project root:
-
-   ```yaml
-   version: '3.8'
-
-   services:
-     # PostgreSQL Database
-     postgres:
-       image: postgres:15-alpine
-       container_name: smarturl-postgres
-       environment:
-         - POSTGRES_USER=postgres
-         - POSTGRES_PASSWORD=postgres
-         - POSTGRES_DB=smarturl
-       ports:
-         - "5432:5432"
-       volumes:
-         - postgres_data:/var/lib/postgresql/data
-       healthcheck:
-         test: ["CMD-SHELL", "pg_isready -U postgres"]
-         interval: 5s
-         timeout: 5s
-         retries: 5
-
-     # Redis Cache
-     redis:
-       image: redis:alpine
-       container_name: smarturl-redis
-       ports:
-         - "6379:6379"
-       volumes:
-         - redis_data:/data
-       command: redis-server --appendonly yes
-       healthcheck:
-         test: ["CMD", "redis-cli", "ping"]
-         interval: 5s
-         timeout: 5s
-         retries: 5
-         
-     # pgAdmin for PostgreSQL management
-     pgadmin:
-       image: dpage/pgadmin4
-       container_name: smarturl-pgadmin
-       environment:
-         - PGADMIN_DEFAULT_EMAIL=admin@example.com
-         - PGADMIN_DEFAULT_PASSWORD=adminpassword
-       ports:
-         - "5050:80"
-       depends_on:
-         - postgres
-
-   volumes:
-     postgres_data:
-     redis_data:
-   ```
-
-5. **Create a `.env` file**
-
-   ```
-   DB_NAME=smarturl
-   DB_USER=postgres
-   DB_PASSWORD=postgres
-   DB_HOST=localhost
-   DB_PORT=5432
-   REDIS_HOST=localhost
-   REDIS_PORT=6379
-   REDIS_TTL=3600
-   ```
-
-6. **Start Docker services**
-
-   ```bash
-   docker-compose up -d
-   ```
-
-7. **Run the application**
-
-   ```bash
-   python main.py
-   ```
-
-8. **Access the application**
-   - Web interface: http://localhost:8000
-   - API documentation: http://localhost:8000/docs
-   - pgAdmin: http://localhost:5050 (login with admin@example.com/adminpassword)
-
-## Project Structure
+Create a `.env` file in the project root:
 
 ```
-/SmartUrlServices/
-├── main.py                 # Application entry point
-├── requirements.txt        # Project dependencies
-├── .env                    # Environment variables (not in version control)
-├── docker-compose.yml      # Docker services configuration
-├── static/                 # Static files directory
-│   ├── qrcodes/            # Generated QR code images
-│   └── barcodes/           # Generated barcode images
+# Database configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_NAME=smarturl
+
+# Redis configuration
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_TTL=3600
+REDIS_SSL=false
+
+# AWS configuration
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+AWS_REGION=eu-west-2
+S3_BUCKET_NAME=your-bucket-name
+
+# JWT Authentication
+JWT_SECRET=your-secret-key-for-jwt
+JWT_ACCESS_EXPIRE=3600
+JWT_REFRESH_EXPIRE=604800
+
+# Google OAuth (optional)
+GOOGLE_CLIENT_ID=your-google-client-id
+```
+
+## 🏃‍♂️ Running the Service
+
+### Local Development Setup
+
+For local development without AWS:
+
+1. **Start PostgreSQL and Redis via Docker**
+
+```bash
+docker-compose up -d
+```
+
+2. **Run the application**
+
+```bash
+uvicorn main:app --reload
+```
+
+3. **Access the API documentation**
+
+Open your browser to http://localhost:8000/docs to view and test the API.
+
+### AWS Setup
+
+For running with AWS services:
+
+1. **Set up the SSH key for EC2 jump host access**
+
+```bash
+chmod 600 SmartUrl-KeyPair.pem
+```
+
+2. **Start the SSH tunnel to AWS services**
+
+```bash
+./tunnel.sh
+```
+
+This creates tunnels to:
+- PostgreSQL: localhost:5432 → RDS instance
+- Redis: localhost:6379 → ElastiCache instance
+
+3. **Verify AWS connections**
+
+```bash
+python test_aws_connections.py
+```
+
+4. **Run the application**
+
+```bash
+uvicorn main:app --reload
+```
+
+5. **To close the tunnel when done**
+
+```bash
+pkill -f 'ssh -i.*smarturl'
+```
+
+## 🔨 AWS Architecture and Configuration
+
+### AWS Services Used
+
+1. **Amazon RDS for PostgreSQL**
+   - Database service for URL and user data
+   - Located in a private subnet for security
+   - Access through EC2 jump host via SSH tunnel
+
+2. **Amazon ElastiCache for Redis**
+   - Caching service for improved performance
+   - Reduces database load
+   - Access through EC2 jump host via SSH tunnel
+
+3. **Amazon S3**
+   - Storage for QR code and barcode images
+   - Public read access for serving images
+   - Private write access with AWS credentials
+
+4. **Amazon EC2**
+   - Jump host for secure access to private services
+   - Acts as a security gateway to RDS and ElastiCache
+   - SSH key-based authentication
+
+### Configuring AWS Services
+
+#### RDS PostgreSQL Setup
+
+1. Create an RDS PostgreSQL instance in the AWS Console:
+   - Engine: PostgreSQL
+   - Version: 13.4 or newer
+   - Instance type: db.t3.micro (for development)
+   - Storage: 20GB (minimum)
+   - Multi-AZ: No (for development)
+   - VPC: Private subnet with security group
+   - Security Group: Allow inbound from EC2 jump host only
+
+2. Initialize the database:
+   - The application will create required tables at startup
+   - Database schema documentation is in `documents/SmartUrl-database-schema.md`
+
+#### ElastiCache Redis Setup
+
+1. Create an ElastiCache Redis instance:
+   - Engine: Redis
+   - Version: 6.x or newer
+   - Node type: cache.t3.micro (for development)
+   - Number of nodes: 1 (for development)
+   - VPC: Same VPC as RDS
+   - Security Group: Allow inbound from EC2 jump host only
+
+2. Configure Redis in `.env`:
+   - When using tunnel: host=localhost
+   - Set REDIS_SSL=false when using tunnel
+
+#### S3 Bucket Setup
+
+1. Create an S3 bucket:
+   - Name: Choose a unique name
+   - Region: Same as RDS/ElastiCache
+   - Access: Block all public access
+   - Versioning: Disabled (for development)
+
+2. Configure bucket policy to allow read access:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::your-bucket-name/*"
+        }
+    ]
+}
+```
+
+3. Set up CORS configuration:
+```json
+[
+    {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET"],
+        "AllowedOrigins": ["*"],
+        "ExposeHeaders": []
+    }
+]
+```
+
+4. Create an IAM user with S3 permissions:
+   - Create a new IAM user for programmatic access
+   - Attach policy: AmazonS3FullAccess
+   - Save access key and secret for `.env` file
+
+#### EC2 Jump Host Setup
+
+1. Launch an EC2 instance:
+   - Amazon Linux 2
+   - t2.micro (for development)
+   - VPC: Same as RDS/ElastiCache
+   - Security Group: Allow SSH inbound (port 22) from your IP
+   - Key Pair: Generate new or use existing (save as SmartUrl-KeyPair.pem)
+
+2. Configure security groups:
+   - EC2 Security Group: Allow SSH (port 22) from your IP
+   - RDS Security Group: Allow PostgreSQL (port 5432) from EC2 Security Group
+   - ElastiCache Security Group: Allow Redis (port 6379) from EC2 Security Group
+
+### SSH Tunnel Setup
+
+The `tunnel.sh` script creates SSH tunnels to access AWS services:
+
+```bash
+#!/bin/bash
+ssh -i ./SmartUrl-KeyPair.pem \
+    -L 5432:smarturl-postgres.cfai00ak63dx.eu-west-2.rds.amazonaws.com:5432 \
+    -L 6379:smarturl-redis.ddr3jj.0001.euw2.cache.amazonaws.com:6379 \
+    -N -f ec2-user@18.168.0.231
+```
+
+When running the tunnel:
+1. Local port 5432 connects to your RDS instance
+2. Local port 6379 connects to your ElastiCache instance
+3. `-N` prevents executing remote commands
+4. `-f` runs the tunnel in the background
+
+## 📊 Development
+
+### Authentication Configuration Explained
+
+The JWT authentication system requires three environment variables:
+
+- **JWT_SECRET**: This is the secret key used to sign and verify JWT tokens. You should generate a secure random string for this. For example:
+  ```bash
+  # Generate a random secret key using Python
+  python -c "import secrets; print(secrets.token_hex(32))"
+  ```
+
+- **JWT_ACCESS_EXPIRE**: The lifespan of access tokens in seconds. The default is 3600 (1 hour). 
+  - Short-lived access tokens improve security
+  - Adjust based on your security requirements
+
+- **JWT_REFRESH_EXPIRE**: The lifespan of refresh tokens in seconds. The default is 604800 (7 days).
+  - Longer-lived refresh tokens reduce the need for users to log in frequently
+  - Users can get new access tokens without re-authenticating until this expires
+
+### Code Quality
+
+The codebase follows several best practices to maintain quality and improve maintainability:
+
+- **Standardized Documentation**: Google-style docstrings are used throughout the codebase to provide consistent documentation
+- **Design Patterns**: Base classes like `BaseCodeService` reduce code duplication for similar services
+- **Caching Strategy**: Redis is used for caching with appropriate TTLs and fallback mechanisms
+- **Error Handling**: Consistent error handling patterns with proper logging
+- **Modular Architecture**: Clear separation of concerns between API routes, services, and data access layers
+
+### Project Structure
+
+```
+smarturl/
 ├── app/
-│   ├── __init__.py         # Makes app a package
 │   ├── api/
-│   │   ├── __init__.py     # Makes api a package
-│   │   └── routes.py       # API endpoint definitions
+│   │   ├── auth_routes.py     # User authentication routes
+│   │   ├── history_routes.py  # History tracking routes
+│   │   └── url_routes.py      # URL, QR code, and barcode routes
 │   ├── models/
-│   │   ├── __init__.py     # Makes models a package
-│   │   └── schemas.py      # Pydantic data models
+│   │   ├── history_schema.py  # History-related schemas
+│   │   ├── url_schemas.py     # URL-related schemas
+│   │   └── user_schema.py     # User-related schemas
 │   ├── services/
-│   │   ├── __init__.py     # Makes services a package
-│   │   ├── url_service.py  # URL shortener business logic
-│   │   ├── qr_service.py   # QR code generator business logic
-│   │   └── barcode_service.py # Barcode generator business logic
+│   │   ├── url_service.py      # URL shortening service
+│   │   ├── qr_service.py       # QR code generation service
+│   │   ├── barcode_service.py  # Barcode generation service
+│   │   ├── base_code_service.py # Shared base for codes
+│   │   └── s3_service.py       # AWS S3 integration service
 │   ├── database/
-│   │   ├── __init__.py     # Makes database a package
-│   │   └── db.py           # Database operations
+│   │   ├── history_db.py      # History retrieval functions
+│   │   ├── url_db.py          # URL-related database operations
+│   │   └── user_db.py         # User-related database operations
 │   └── cache/
-│       ├── __init__.py     # Makes cache a package
-│       └── redis_client.py # Redis connection and caching functions
+│       ├── redis_client.py    # Redis caching functionality
+│       └── cache_manager.py   # Cache management utilities
+├── documents/
+│   ├── SmartUrl-api.md              # API documentation
+│   ├── SmartUrl-database-schema.md  # Database schema documentation
+│   └── SmartUrl-Technical-Documentation.md # Comprehensive documentation
+├── main.py                    # Application entry point
+├── requirements.txt           # Project dependencies
+├── .env                       # Environment variables
+├── tunnel.sh                  # SSH tunnel script
+├── test_aws_connections.py    # AWS connection tester
+└── docker-compose.yml         # Docker services configuration
 ```
 
-## Performance Optimization
+### Local Development with Docker
 
-The application uses several techniques for performance optimization:
+For local development with a PostgreSQL container instead of RDS:
 
-1. **Redis Caching**: Popular short URLs, QR codes, and barcodes are cached in Redis to reduce database lookups.
-2. **Counter Batching**: Click and scan counts are aggregated in Redis and updated in the database periodically (every 10 increments) to reduce database writes.
-3. **Info Caching**: Frequently requested information about resources is cached to improve response times.
-4. **Rate Limiting**: API endpoints are protected against abuse with SlowAPI-based rate limiting, enforcing limits of 10 requests per minute for resource creation endpoints.
+```bash
+# Use the local development docker-compose file
+docker-compose -f docker-compose.dev.yml up -d
+```
 
-### Rate Limiting Implementation
+## Using the API
 
-The application uses the SlowAPI library to provide tiered rate limiting:
+### Authentication
 
-- **Tier 1: Resource Creation** (10 requests per minute)
-  - `/shorten/`: Create short URLs
-  - `/qrcode/`: Create QR codes
-  - `/barcode/`: Create barcodes
-  
-- **Tier 2: Resource Information** (60 requests per minute)
-  - `/info/{short_code}`: Get short URL information
-  - `/qrcode/info/{qr_code_id}`: Get QR code information
-  - `/barcode/info/{barcode_id}`: Get barcode information
-  
-- **Tier 3: User-Facing Endpoints** (No rate limiting)
-  - `/{short_code}`: Redirect from short URLs
-  - `/qrcode/{qr_code_id}`: Redirect from QR codes
-  - `/barcode/{barcode_id}`: Redirect from barcodes
-  - `/qrcode/{qr_code_id}/image`: Get QR code images
-  - `/barcode/{barcode_id}/image`: Get barcode images
+**Register a new user**:
+```
+POST /api/auth/register
+{
+  "email": "john@example.com",
+  "password": "securepassword",
+  "name": "John Doe"
+}
+```
 
-This tiered approach protects resource-intensive operations while ensuring high availability for end-user experiences. Rate limits are applied per IP address.
+**Login**:
+```
+POST /api/auth/login
+{
+  "email": "john@example.com",
+  "password": "securepassword"
+}
+```
 
-## Website Title Extraction
+**Access protected endpoints**:
+Include the JWT token in the Authorization header:
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
 
-SmartUrl automatically extracts the title of the target website when creating URLs, QR codes, or barcodes:
+### Creating Resources
 
-### How It Works
+**Create short URL**:
+```
+POST /api/urls/shorten
+{
+  "original_url": "https://example.com/your/long/url"
+}
+```
 
-1. When a user submits a URL for shortening, QR code, or barcode generation, the service makes a request to the target website.
-2. The HTML response is parsed using BeautifulSoup to extract the content of the `<title>` tag.
-3. This title is stored in the database and returned in API responses for better context.
-4. The title is displayed in the history and information views, making it easier to identify resources.
+**Create QR code**:
+```
+POST /api/qr/create
+{
+  "content": "https://example.com/your/long/url"
+}
+```
 
-### Implementation Details
+**Create barcode**:
+```
+POST /api/barcode/create
+{
+  "content": "https://example.com/your/long/url",
+  "barcode_type": "code128"
+}
+```
 
-- A custom User-Agent header is used to prevent being blocked by websites
-- Requests have a 5-second timeout to prevent long processing times
-- Error handling ensures the service works even if title extraction fails
-- If extraction fails (network issues, invalid URL, missing title tag), the title field will be null
-- No additional input is required from users for this feature
+### Viewing History
 
-### Redis Key Patterns
+**Get URL click history**:
+```
+GET /api/history/url/{short_code}?page=1&limit=20
+```
 
-The application uses the following Redis key patterns:
+**Get QR code scan history**:
+```
+GET /api/history/qr/{qr_id}?page=1&limit=20
+```
 
-- **URL Keys**:
-  - `url:{short_code}` - The original URL for a short link
-  - `info:{short_code}` - Full information about a short URL
-  - `clicks:{short_code}` - Click counter for a short URL
+**Get barcode scan history**:
+```
+GET /api/history/barcode/{barcode_id}?page=1&limit=20
+```
 
-- **QR Code Keys**:
-  - `qrcode:{qr_code_id}` - The original URL for a QR code
-  - `qrinfo:{qr_code_id}` - Full information about a QR code
-  - `qrscans:{qr_code_id}` - Scan counter for a QR code
+**Get user history**:
+```
+GET /api/history/user/{user_id}?page=1&limit=20&resource_type=url
+```
 
-- **Barcode Keys**:
-  - `barcode:{barcode_id}` - The original URL for a barcode
-  - `barinfo:{barcode_id}` - Full information about a barcode
-  - `barscans:{barcode_id}` - Scan counter for a barcode
+All history endpoints support the following parameters:
+- `page`: Page number (default: 1)
+- `limit`: Items per page (default: 20)
+- `start_date`: Filter by start date (ISO format)
+- `end_date`: Filter by end date (ISO format)
+- `resource_type`: Filter by resource type (url, qr, barcode)
 
-- **Rate Limiting Keys**:
-  - `ratelimit:{key}` - Rate limit counters for API endpoints
+## 🚢 Deployment
 
-## API Endpoints
+### Administrative Endpoints
 
-### URL Shortener Endpoints
+The application provides several admin endpoints for maintenance:
 
-- **POST /shorten/**: Create a new short URL
-- **GET /{short_code}**: Redirect to the original URL
-- **GET /info/{short_code}**: Get information about a short URL
+**Sync click counts**:
+```
+POST /api/admin/sync-clicks
+```
 
-### QR Code Endpoints
+**Cache management**:
+```
+GET /api/admin/cache/stats
+POST /api/admin/cache/clear/{prefix}
+```
 
-- **POST /qrcode/**: Create a new QR code
-- **GET /qrcode/{qr_code_id}/image**: Get the QR code image
-- **GET /qrcode/{qr_code_id}**: Redirect to the original URL
-- **GET /qrcode/info/{qr_code_id}**: Get information about a QR code
+### Production Considerations
 
-### Barcode Endpoints
+- Set up proper monitoring and logging
+- Configure HTTPS with a valid SSL certificate
+- Implement authentication for administrative endpoints
+- Use managed services (AWS ECS/EKS) for container orchestration
+- Set up CloudFront for content delivery
+- Configure scheduled tasks for cache synchronization
+- Implement proper database backup strategies
 
-- **POST /barcode/**: Create a new barcode
-- **GET /barcode/{barcode_id}/image**: Get the barcode image
-- **GET /barcode/{barcode_id}**: Redirect to the original URL
-- **GET /barcode/info/{barcode_id}**: Get information about a barcode
+## 📚 Documentation
 
-## Working with pgAdmin
+For comprehensive technical documentation, see:
 
-After starting the Docker services, you can access pgAdmin at http://localhost:5050:
+- `documents/SmartUrl-Technical-Documentation.md` - Complete system documentation
+- `documents/SmartUrl-api.md` - API documentation
+- `documents/SmartUrl-database-schema.md` - Database schema documentation
 
-1. Login with email: admin@example.com and password: adminpassword
-2. Add a new server with these connection details:
-   - Host: postgres
-   - Port: 5432
-   - Username: postgres
-   - Password: postgres
-   - Database: smarturl
+## 🙏 Acknowledgements
 
-## Redis Cache Management
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [PostgreSQL](https://www.postgresql.org/)
+- [Redis](https://redis.io/)
+- [AWS](https://aws.amazon.com/)
+- [QR Code](https://pypi.org/project/qrcode/)
+- [python-barcode](https://pypi.org/project/python-barcode/)
 
-To monitor and manage the Redis cache:
+## 🧩 Code Structure Highlights
 
-1. Access the Redis CLI within the Docker container:
-   ```bash
-   docker exec -it smarturl-redis redis-cli
-   ```
+The architecture follows a modular design with several noteworthy patterns:
 
-2. View all cache keys:
-   ```bash
-   KEYS *
-   ```
-
-3. View a specific cached value:
-   ```bash
-   GET url:abc123
-   ```
-
-4. Clear the entire cache if needed:
-   ```bash
-   FLUSHALL
-   ```
-
-5. Get stats about current Redis memory usage:
-   ```bash
-   INFO memory
-   ```
-
-## Troubleshooting
-
-### PostgreSQL Connection Issues
-
-If you have a local PostgreSQL instance running, you may encounter port conflicts. You can either:
-- Stop your local PostgreSQL service, or
-- Change the port in docker-compose.yml to use a different port (e.g., 5433) and update your .env file accordingly
-
-### Redis Connection Issues
-
-If Redis fails to connect, check:
-- If you have a local Redis instance running on port 6379
-- Update your .env and docker-compose.yml to use a different port if needed
-- Verify with `docker-compose ps` that the Redis container is running
-- Try connecting manually: `docker exec -it smarturl-redis redis-cli ping`
-
-### Docker Issues
-
-If containers fail to start:
-- Ensure Docker Desktop is running
-- Check container logs: `docker-compose logs`
-- Verify ports are not in use by other services
-- Try restarting the containers: `docker-compose restart`
-
-### Image Generation Issues
-
-If QR code or barcode images are not generating:
-- Ensure the static directories have proper permissions
-- Check for Python library dependencies (Pillow, qrcode, python-barcode, cairosvg)
-- Inspect the logs for any file system related errors
+1. **Service Layer Pattern**: Business logic is encapsulated in service modules
+2. **Repository Pattern**: Database access is isolated in database modules
+3. **Dependency Injection**: FastAPI's dependency system for clean API routes
+4. **Caching Layer**: Redis caching with proper invalidation strategies
+5. **Base Service Inheritance**: Common code isolated in base service classes
+6. **Consistent Error Handling**: Standardized approach to error handling and logging
