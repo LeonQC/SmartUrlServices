@@ -1,180 +1,142 @@
 """
-Business logic for barcode generation
+Barcode generation and management service.
+
+This module provides functionality for creating, managing, and retrieving
+barcodes (specifically Code128 barcodes). It leverages the BaseCodeService
+for common code operations while implementing barcode-specific logic.
 """
-import random
-import string
+
 import io
+import logging
 from app.database import url_db as db
-from app.cache.redis_client import redis_client
-import json
-import requests
-from bs4 import BeautifulSoup
 import barcode
 from barcode.writer import ImageWriter
-from app.services.s3_service import upload_file_to_s3, file_exists_in_s3, get_s3_file_url
+from app.utils.web_utils import extract_title
+from app.services.base_code_service import BaseCodeService
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Create barcode service instance
+barcode_service_base = BaseCodeService("barcode")
 
 
 # Create a new barcode
-def create_barcode(target_url, base_url):
-    # Generate a random barcode ID
-    barcode_id = generate_random_id()
+def create_barcode(target_url, base_url, user_id=None):
+    """Create a new barcode for a URL.
 
-    # Try to extract the title from the URL
-    title = extract_title(target_url)
+    Generates a Code128 barcode image for the given URL, saves it to S3,
+    and records the information in the database.
 
-    # Create a barcode (Code128 is a versatile barcode format)
-    code128 = barcode.get('code128', f"{base_url}barcode/{barcode_id}", writer=ImageWriter())
+    Args:
+        target_url: The URL that the barcode will redirect to
+        base_url: The base URL of the application (used to construct the barcode)
+        user_id: Optional user ID to associate with the barcode
 
-    # Save the barcode to a BytesIO object
-    img_byte_arr = io.BytesIO()
-    code128.write(img_byte_arr, options={'write_text': False})
-    img_byte_arr.seek(0)
+    Returns:
+        dict: A dictionary containing barcode information including IDs and URLs
 
-    # Upload to S3
-    file_path = f"barcodes/{barcode_id}.png"
-    s3_url = upload_file_to_s3(img_byte_arr.getvalue(), file_path, 'image/png')
-
-    # Save barcode in the database
-    db.save_barcode(target_url, barcode_id, title)
-
-    # Create the response object
-    response = {
-        "original_url": target_url,
-        "barcode_id": barcode_id,
-        "barcode_url": f"{base_url}barcode/{barcode_id}",
-        "barcode_image_url": f"{base_url}barcode/{barcode_id}/image",
-        "scans": 0,
-        "title": title
-    }
-
-    # Cache the barcode info
-    redis_client.set(f"barcode:{barcode_id}", target_url)
-    redis_client.set(f"barinfo:{barcode_id}", json.dumps(response))
-    redis_client.set(f"barscans:{barcode_id}", 0)
-
-    return response
-
-
-# Generate a random ID for barcodes
-def generate_random_id(length=8):
-    # Generate a random ID of the given length
-    characters = string.ascii_letters + string.digits
-    random_id = ''.join(random.choice(characters) for _ in range(length))
-
-    # Check if the ID already exists in the database
-    while db.barcode_exists(random_id):
-        random_id = ''.join(random.choice(characters) for _ in range(length))
-
-    return random_id
-
-
-# Extract title from a URL
-def extract_title(url):
+    Raises:
+        Exception: If there's an error in barcode creation
+    """
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        title_tag = soup.find('title')
+        # Convert URL to string to handle Pydantic HttpUrl objects
+        target_url = str(target_url)
 
-        if title_tag:
-            return title_tag.text.strip()
-        else:
-            return None
+        logger.debug(f"Creating barcode for URL: {target_url}")
+
+        # Generate a random barcode ID
+        barcode_id = barcode_service_base.generate_random_id()
+
+        # Try to extract the title from the URL
+        title = extract_title(target_url)
+
+        # Create a barcode (Code128 is a versatile barcode format)
+        code128 = barcode.get('code128', f"{base_url}barcode/{barcode_id}", writer=ImageWriter())
+
+        # Save the barcode to a BytesIO object
+        img_byte_arr = io.BytesIO()
+        code128.write(img_byte_arr, options={'write_text': False})
+        img_byte_arr.seek(0)
+
+        # Save to S3 using base service
+        barcode_service_base.save_to_s3(img_byte_arr, barcode_id, user_id)
+
+        # Save barcode in the database with optional user_id
+        db.save_barcode(target_url, barcode_id, title, user_id)
+
+        # Get the creation timestamp
+        created_at = db.get_barcode_created_at(barcode_id)
+        created_at_str = created_at.isoformat() if created_at else None
+
+        # Create the response object
+        response = {
+            "original_url": target_url,
+            "barcode_id": barcode_id,
+            "barcode_url": f"{base_url}barcode/{barcode_id}",
+            "barcode_image_url": f"{base_url}barcode/{barcode_id}/image",
+            "scans": 0,
+            "title": title,
+            "user_id": user_id,
+            "created_at": created_at_str
+        }
+
+        # Cache the barcode info using base service
+        barcode_service_base.update_cache(barcode_id, target_url, response)
+
+        logger.info(f"Created barcode with ID: {barcode_id}")
+        return response
     except Exception as e:
-        print(f"Error extracting title: {e}")
-        return None
+        logger.error(f"Error creating barcode: {e}", exc_info=True)
+        raise
+
+
+# Use the base service's generate_random_id method
 
 
 # Handle redirection from barcode to original URL
 def handle_barcode_redirect(barcode_id):
-    # Try to get the URL from Redis cache
-    original_url = redis_client.get(f"barcode:{barcode_id}")
+    """Handle redirection from barcode to original URL.
 
-    if original_url:
-        # Increment the scan counter in Redis
-        redis_client.incr(f"barscans:{barcode_id}")
+    Args:
+        barcode_id: The unique identifier for the barcode
 
-        # If the counter is a multiple of 10, update the database
-        scans = int(redis_client.get(f"barscans:{barcode_id}") or 0)
-        if scans % 10 == 0:
-            db.update_barcode_scan_count(barcode_id, scans)
+    Returns:
+        str or None: The original URL if found, None otherwise
 
-        return original_url
-
-    # If not in cache, get from database
-    result = db.find_barcode_by_id(barcode_id)
-
-    if result:
-        original_url, scans, title = result
-
-        # Increment the scan counter
-        scans += 1
-        db.increment_barcode_scans(barcode_id)
-
-        # Update the cache
-        redis_client.set(f"barcode:{barcode_id}", original_url)
-        redis_client.set(f"barscans:{barcode_id}", scans)
-
-        return original_url
-
-    return None
+    Note:
+        This function delegates to the base service implementation
+        while maintaining a barcode-specific interface.
+    """
+    return barcode_service_base.handle_redirect(barcode_id)
 
 
 # Get information about a barcode
 def get_barcode_info(barcode_id, base_url):
-    # Try to get from Redis cache
-    barcode_info = redis_client.get(f"barinfo:{barcode_id}")
+    """Get information about a barcode.
 
-    if barcode_info:
-        info = json.loads(barcode_info)
+    Retrieves detailed barcode information including original URL,
+    scan count, and associated metadata.
 
-        # Update the scan count in the cached info
-        scans = int(redis_client.get(f"barscans:{barcode_id}") or 0)
-        info["scans"] = scans
+    Args:
+        barcode_id: The unique identifier for the barcode
+        base_url: The base URL to use for constructing barcode URLs
 
-        return info
-
-    # If not in cache, get from database
-    result = db.find_barcode_by_id(barcode_id)
-
-    if result:
-        original_url, scans, title = result
-
-        # Create response object
-        response = {
-            "original_url": original_url,
-            "barcode_id": barcode_id,
-            "barcode_url": f"{base_url}barcode/{barcode_id}",
-            "barcode_image_url": f"{base_url}barcode/{barcode_id}/image",
-            "scans": scans,
-            "title": title
-        }
-
-        # Update the cache
-        redis_client.set(f"barinfo:{barcode_id}", json.dumps(response))
-        redis_client.set(f"barcode:{barcode_id}", original_url)
-        redis_client.set(f"barscans:{barcode_id}", scans)
-
-        return response
-
-    return None
+    Returns:
+        dict or None: A dictionary containing barcode information if found,
+                     None otherwise
+    """
+    return barcode_service_base.get_code_info(barcode_id, base_url)
 
 
 # Get barcode image URL (used by url_routes.py)
 def get_barcode_image_url(barcode_id):
-    # Check if barcode exists in database
-    if not db.barcode_exists(barcode_id):
-        return None
+    """Get the S3 URL for a barcode image.
 
-    # Generate the file path
-    file_path = f"barcodes/{barcode_id}.png"
+    Args:
+        barcode_id: The unique identifier for the barcode
 
-    # Check if the file exists in S3
-    if not file_exists_in_s3(file_path):
-        # Could implement recovery logic here
-        return None
-
-    # Return the S3 URL for the image
-    return get_s3_file_url(file_path)
+    Returns:
+        str or None: The S3 URL for the barcode image if found, None otherwise
+    """
+    return barcode_service_base.get_image_url(barcode_id)

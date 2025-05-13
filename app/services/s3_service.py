@@ -50,14 +50,13 @@ def upload_file_to_s3(file_data, file_name, content_type):
         # Create file-like object in memory
         file_obj = io.BytesIO(file_data)
 
-        # Upload file to S3 - Removed ACL parameter
+        # Upload file to S3
         s3_client.upload_fileobj(
             file_obj,
             bucket_name,
             file_name,
             ExtraArgs={
                 'ContentType': content_type
-                # Removed 'ACL': 'public-read' as it's not supported
             }
         )
 
@@ -72,6 +71,7 @@ def upload_file_to_s3(file_data, file_name, content_type):
     except Exception as e:
         print(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 # Check if file exists in S3
 def file_exists_in_s3(file_name):
@@ -102,17 +102,120 @@ def file_exists_in_s3(file_name):
         return False
 
 
-# Get the URL for a file in S3
-def get_s3_file_url(file_name):
+def get_s3_file_url(file_name, expires_in=3600):
     """
-    Get the URL for a file in S3
+    Get a pre-signed URL for a file in S3 that expires after a set time
 
     Args:
         file_name: The name of the file (including path)
+        expires_in: Number of seconds until the pre-signed URL expires
 
     Returns:
-        The URL of the file
+        The pre-signed URL of the file
     """
-    bucket_name = get_s3_config()["bucket_name"]
-    region = get_s3_config()["region_name"]
-    return f"https://{bucket_name}.s3.{region}.amazonaws.com/{file_name}"
+    try:
+        s3_client = get_s3_client()
+        bucket_name = get_s3_config()["bucket_name"]
+
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': file_name
+            },
+            ExpiresIn=expires_in
+        )
+        return url
+    except Exception as e:
+        print(f"Error generating pre-signed URL: {e}")
+        return None
+
+def delete_user_files(user_id):
+    """
+    Delete all S3 files associated with a user
+
+    Args:
+        user_id: The ID of the user whose files to delete
+
+    Returns:
+        bool: True if files were deleted successfully, False otherwise
+    """
+    try:
+        s3_client = get_s3_client()
+        bucket_name = get_s3_config()["bucket_name"]
+
+        # Define prefixes for each type of user resource
+        prefixes = [
+            f"qrcodes/user_{user_id}/",
+            f"barcodes/user_{user_id}/"
+        ]
+
+        deleted_count = 0
+
+        # Check each prefix and delete matching objects
+        for prefix in prefixes:
+            # List objects with this prefix
+            response = s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix
+            )
+
+            # If objects found, delete them
+            if 'Contents' in response and response['Contents']:
+                objects_to_delete = [{'Key': obj['Key']} for obj in response['Contents']]
+
+                if objects_to_delete:
+                    s3_client.delete_objects(
+                        Bucket=bucket_name,
+                        Delete={'Objects': objects_to_delete}
+                    )
+                    deleted_count += len(objects_to_delete)
+                    print(f"Deleted {len(objects_to_delete)} objects with prefix {prefix}")
+
+        # Now find and delete specific QR code and barcode files by querying the database
+        # This handles files that don't follow the prefix pattern
+        from app.database import url_db
+        conn = url_db.get_db()
+        cursor = conn.cursor()
+
+        # Get QR codes created by this user
+        cursor.execute("SELECT qr_code_id FROM qrcodes WHERE user_id = %s", (user_id,))
+        qr_codes = cursor.fetchall()
+        qr_objects = []
+        for qr_code in qr_codes:
+            qr_objects.append({'Key': f"qrcodes/{qr_code[0]}.png"})
+
+        # Get barcodes created by this user
+        cursor.execute("SELECT barcode_id FROM barcodes WHERE user_id = %s", (user_id,))
+        barcodes = cursor.fetchall()
+        barcode_objects = []
+        for barcode in barcodes:
+            barcode_objects.append({'Key': f"barcodes/{barcode[0]}.png"})
+
+        cursor.close()
+        conn.close()
+
+        # Delete the QR code files
+        if qr_objects:
+            s3_client.delete_objects(
+                Bucket=bucket_name,
+                Delete={'Objects': qr_objects}
+            )
+            deleted_count += len(qr_objects)
+            print(f"Deleted {len(qr_objects)} QR code files")
+
+        # Delete the barcode files
+        if barcode_objects:
+            s3_client.delete_objects(
+                Bucket=bucket_name,
+                Delete={'Objects': barcode_objects}
+            )
+            deleted_count += len(barcode_objects)
+            print(f"Deleted {len(barcode_objects)} barcode files")
+
+        print(f"Total deleted files for user {user_id}: {deleted_count}")
+        return True
+
+    except Exception as e:
+        print(f"Error deleting user files from S3: {e}")
+        return False
